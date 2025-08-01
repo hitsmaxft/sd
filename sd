@@ -202,14 +202,24 @@ __sd() {
   local target=$root
   local arg
 
+  local found_separator="false"
   while [[ $# -gt 0 ]]; do
     arg="$1"
-    if [[ -d "$target/$arg" ]]; then
+    # If we've found the separator, stop processing path components
+    if [[ "$found_separator" = "true" ]]; then
+      break
+    fi
+    
+    if [[ "$arg" = "--" ]]; then
+      found_separator="true"
+      shift
+    elif [[ -d "$target/$arg" ]]; then
       target="$target/$arg"
       shift
     elif [[ -f "$target/$arg" ]]; then
       target="$target/$arg"
       shift
+      # Don't break here, we want to preserve remaining args for the script
       break
     else
       break
@@ -222,9 +232,16 @@ __sd() {
   local found_cat="false"
   local found_which="false"
   local found_really="false"
+  local found_separator="false"
 
   for arg in "$@"; do
+    # Stop checking for special parameters after -- separator
+    if [[ "$found_separator" = "true" ]]; then
+      continue
+    fi
+    
     case "$arg" in
+      --) found_separator=true ;;
       --help) found_help=true ;;
       --new) found_new=true ;;
       --edit) found_edit=true ;;
@@ -244,16 +261,17 @@ __sd() {
   fi
 
   if [[ "$found_really" = "true" ]]; then
+    # Remove the first occurrence of --really from arguments
     local -a preserved=()
+    local found_really_arg="false"
     for arg in "$@"; do
-      case "$arg" in
-        '--really') shift; break ;;
-        *) preserved+=("$arg"); shift ;;
-      esac
+      if [[ "$arg" = "--really" && "$found_really_arg" = "false" ]]; then
+        found_really_arg="true"
+        continue
+      fi
+      preserved+=("$arg")
     done
-    if [[ ${#preserved[@]} -gt 0 ]]; then
-      set -- "${preserved[@]}" "$@"
-    fi
+    set -- "${preserved[@]}"
   elif [[ "$found_new" = "true" ]]; then
     __sd_new "$target" "$@"
     exit 0
