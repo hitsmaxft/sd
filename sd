@@ -205,15 +205,7 @@ __sd() {
   local found_separator="false"
   while [[ $# -gt 0 ]]; do
     arg="$1"
-    # If we've found the separator, stop processing path components
-    if [[ "$found_separator" = "true" ]]; then
-      break
-    fi
-    
-    if [[ "$arg" = "--" ]]; then
-      found_separator="true"
-      shift
-    elif [[ -d "$target/$arg" ]]; then
+    if [[ -d "$target/$arg" ]]; then
       target="$target/$arg"
       shift
     elif [[ -f "$target/$arg" ]]; then
@@ -272,6 +264,20 @@ __sd() {
       preserved+=("$arg")
     done
     set -- "${preserved[@]}"
+
+  elif [[ "$found_separator" = "true" ]]; then
+    # Remove the first occurrence of --really from arguments
+    local -a preserved=()
+    local found_sep_arg="false"
+    for arg in "$@"; do
+      if [[ "$arg" = "--" && "$found_sep_arg" = "false" ]]; then
+        found_sep_arg="true"
+        continue
+      fi
+      preserved+=("$arg")
+    done
+    set -- "${preserved[@]}"
+
   elif [[ "$found_new" = "true" ]]; then
     __sd_new "$target" "$@"
     exit 0
