@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 
+
+if [[ "$SD_ROOT" != "/" ]]; then
+    SD_ROOT="${SD_ROOT%/}"
+fi
+
 __sd_join_path() {
   echo "$@" | tr ' ' /
 }
@@ -14,6 +19,74 @@ __sd_cat() {
 
 __sd_edit() {
   ${SD_EDITOR:-${VISUAL:-${EDITOR:-vi}}} "$1"
+}
+
+__sd_list() {
+  local root=${SD_ROOT:-$HOME/sd}
+  local i file helpfile help command
+  local -a commands helps
+
+  if [[ ! -d "$root" ]]; then
+    echo "No script directory found at $root" >&2
+    exit 1
+  fi
+
+  echo "Available commands:"
+  echo
+
+  commands=()
+  helps=()
+
+  # Recursively find all executable files
+  while IFS= read -r -d '' file; do
+    if [[ ! -x "$file" ]]; then
+      continue
+    fi
+    
+    # Get relative path from root
+    local rel_path="${file#$root/}"
+    command="$rel_path"
+
+    if [[ -d "$file" ]]; then
+      helpfile="$file/help"
+      if [[ -f "$helpfile" ]]; then
+        help=$(head -n1 "$helpfile")
+      else
+        help="$command commands"
+      fi
+      command="$command ..."
+    else
+      helpfile="$file.help"
+      if [[ -f "$helpfile" ]]; then
+        help=$(head -n1 "$helpfile")
+      else
+        help=$(sed -nE -e '/^#!/d' -e '/^#/{s/^# *//; p; q;}' "$file")
+      fi
+    fi
+
+    commands+=("$command")
+    helps+=("$help")
+  done < <(find "$root" -type f -executable -print0)
+
+  if [[ ${#commands[@]} -eq 0 ]]; then
+    echo "(no commands found)"
+  else
+    local max_length=0
+    local length
+    for command in "${commands[@]}"; do
+      length=${#command}
+      max_length=$((length > max_length ? length : max_length))
+    done
+
+    if [[ -n ${ZSH_EVAL_CONTEXT+x} ]]; then
+      set -o LOCAL_OPTIONS
+      set -o KSH_ARRAYS
+    fi
+
+    for ((i = 0; i < ${#commands[@]}; i++)); do
+      printf "%-${max_length}s -- %s\\n" "${commands[i]}" "${helps[i]}"
+    done
+  fi
 }
 
 __sd_directory_help() {
@@ -89,6 +162,50 @@ __sd_directory_help() {
       printf "%-${max_length}s -- %s\n" "${commands[i]}" "${helps[i]}"
     done
   fi
+}
+
+__sd_builtin_help() {
+  cat <<EOF
+sd - script directory organizer
+
+USAGE:
+    sd [PATH...] [COMMAND] [ARGS...]
+    sd [OPTIONS]
+
+PATH:
+    Optional directory path within your script directory
+
+COMMAND:
+    The script to execute (if not provided, shows directory contents)
+
+ARGS:
+    Arguments to pass to the script
+
+OPTIONS:
+    --help      Show this help message
+    --list      List all available commands recursively
+    --new       Create a new script
+    --edit      Edit an existing script or directory
+    --cat       Display script contents
+    --which     Show script path
+    --really    Force execution (bypass safety checks)
+    --          Separator to pass remaining args directly to script
+
+EXAMPLES:
+    sd                          # Show scripts in root directory
+    sd web deploy              # Run script at ~/sd/web/deploy
+    sd hello --new             # Create new script ~/sd/hello
+    sd web --list              # Show all scripts in web directory
+    sd backup --edit           # Edit the backup script
+    sd --list                  # Show all available scripts
+
+ENVIRONMENT:
+    SD_ROOT     Script directory root (default: ~/sd)
+    SD_EDITOR   Editor for --edit (default: \$VISUAL or \$EDITOR or vi)
+    SD_CAT      Command for --cat (default: cat)
+
+The SD environment variable is set to the script's directory when executing.
+EOF
 }
 
 __sd_help() {
@@ -218,12 +335,14 @@ __sd() {
     fi
   done
 
+
   local found_help="false"
   local found_new="false"
   local found_edit="false"
   local found_cat="false"
   local found_which="false"
   local found_really="false"
+  local found_list="false"
   local found_separator="false"
 
   for arg in "$@"; do
@@ -240,6 +359,7 @@ __sd() {
       --cat) found_cat=true ;;
       --which) found_which=true ;;
       --really) found_really=true ;;
+      --list) found_list=true ;;
     esac
   done
 
@@ -281,7 +401,13 @@ __sd() {
   elif [[ "$found_new" = "true" ]]; then
     __sd_new "$target" "$@"
     exit 0
-  elif [[ "$found_help" = "true" ]]; then
+  elif [[ "$found_list" = "true" ]]; then
+    __sd_list
+    exit 0
+  elif [[ "$found_help" = "true" && "$target" == "$root" ]]; then
+    __sd_builtin_help
+    exit 0
+  elif [[ "$found_help" = "true" && -n "$target" ]]; then
     __sd_help "$target"
     exit 0
   elif [[ "$found_edit" = "true" ]]; then
